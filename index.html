@@ -278,7 +278,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 // ===== 구글 시트 데이터 로드 =====
 function sheetUrl(sheetId, tabName) {
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}`;
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&headers=1&sheet=${encodeURIComponent(tabName)}`;
 }
 
 function parseSheetJSON(text) {
@@ -353,18 +353,18 @@ function analyzeData() {
 
   const totalSent = historyData.length;
   const todaySent = todayHistory.length;
-  const totalSuccess = historyData.filter(r => String(r['상태'] || r['결과'] || '').includes('성공')).length;
-  const totalFail = historyData.filter(r => String(r['상태'] || r['결과'] || '').includes('실패')).length;
+  const totalSuccess = historyData.filter(r => String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('성공')).length;
+  const totalFail = historyData.filter(r => String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('실패')).length;
   const totalResponse = formData.length;
 
   // 키워드별 집계
   const kwMap = {};
   historyData.forEach(r => {
-    const kw = r['키워드'] || r['검색키워드'] || '미분류';
+    const kw = r['검색 키워드'] || r['키워드'] || r['검색키워드'] || '미분류';
     if (!kwMap[kw]) kwMap[kw] = { crawl: 0, sent: 0, success: 0 };
     kwMap[kw].crawl++;
     kwMap[kw].sent++;
-    if (String(r['상태'] || r['결과'] || '').includes('성공')) kwMap[kw].success++;
+    if (String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('성공')) kwMap[kw].success++;
   });
 
   // 폼 응답에서 업체별 집계
@@ -395,7 +395,7 @@ function analyzeData() {
     keys.forEach(k => {
       if (d.includes(k)) {
         dailyMap[k].sent++;
-        if (String(r['상태'] || r['결과'] || '').includes('실패')) dailyMap[k].fail++;
+        if (String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('실패')) dailyMap[k].fail++;
       }
     });
   });
@@ -514,11 +514,11 @@ function renderHistoryTable() {
 
   el.innerHTML = recent.map(r => {
     const date = r['발송일시'] || r['날짜'] || '-';
-    const email = String(r['이메일'] || r['수신이메일'] || '-');
+    const email = String(r['수신 이메일'] || r['이메일'] || r['수신이메일'] || '-');
     const maskedEmail = email.length > 6 ? email.substring(0,4) + '***' + email.substring(email.indexOf('@')) : email;
     const blog = r['블로그명'] || r['블로그'] || '-';
-    const kw = r['키워드'] || r['검색키워드'] || '-';
-    const status = String(r['상태'] || r['결과'] || '성공');
+    const kw = r['검색 키워드'] || r['키워드'] || r['검색키워드'] || '-';
+    const status = String(r['발송 상태'] || r['상태'] || r['결과'] || '성공');
     const statusClass = status.includes('실패') ? 'status-fail' : 'status-ok';
     const statusText = status.includes('실패') ? '실패' : '성공';
     return `<tr><td>${date}</td><td style="font-family:monospace;font-size:11px">${maskedEmail}</td><td>${blog}</td><td>${kw}</td><td><span class="${statusClass}">${statusText}</span></td></tr>`;
