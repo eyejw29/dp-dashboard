@@ -261,6 +261,9 @@ const SUBJECTS = [
   '[블로거 체험단] 강남 TOP 병원 리쥬란, 쥬베룩, 다이어트패키지 프리미엄 체험 모집!'
 ];
 
+// 자동화 시행 시작일 (이 날짜 이후 데이터만 대시보드에 표시)
+const LAUNCH_DATE = '2026-03-27';
+
 // 저장용 전역 변수
 let historyData = [];
 let formData = [];
@@ -327,7 +330,15 @@ async function loadAllData() {
   }
 
   if (formResult) {
-    formData = formResult.rows;
+    // 시행 시작일 이후 응답만 필터링
+    formData = formResult.rows.filter(r => {
+      const ts = String(r['타임스탬프'] || r['Timestamp'] || Object.values(r)[0] || '');
+      // 날짜 형식: "2026. 3. 27" 또는 "2026/3/27" 또는 "2026-03-27" 등
+      const dateMatch = ts.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/);
+      if (!dateMatch) return false;
+      const rowDate = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
+      return rowDate >= LAUNCH_DATE;
+    });
   }
 
   renderAll();
