@@ -95,6 +95,7 @@ tbody tr:hover{background:#fafafa}
   <div class="tab" data-tab="response">업체별 반응도</div>
   <div class="tab" data-tab="history">발송 이력</div>
   <div class="tab" data-tab="insight">키워드 인사이트</div>
+  <div class="tab" data-tab="filters">필터 관리</div>
   <div class="tab" data-tab="settings">설정 정보</div>
 </div>
 
@@ -201,6 +202,66 @@ tbody tr:hover{background:#fafafa}
   </div>
 </div>
 
+<!-- ===== FILTERS ===== -->
+<div id="tab-filters" class="hidden">
+  <div class="subject-banner" style="margin-bottom:20px">
+    <div class="label">필터 관리</div>
+    <div class="text">병원 자체 블로그, 이미 차단된 이메일 등을 자동 제외합니다. 구글 시트에서 직접 추가/삭제하면 다음 자동화 실행부터 반영됩니다.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="card" style="text-align:center">
+      <div class="card-label">블로그명 필터 <span>🚫</span></div>
+      <div class="card-value" style="color:#ea4335" id="filterBlogCount">-</div>
+      <div class="card-sub">키워드 포함 시 크롤링 제외</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div class="card-label">이메일 필터 <span>✉️</span></div>
+      <div class="card-value" style="color:#7c3aed" id="filterEmailCount">-</div>
+      <div class="card-sub">해당 이메일 발송 제외</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="table-box">
+      <div class="table-header">
+        <h3>블로그명 필터 키워드</h3>
+        <p>블로그명에 아래 키워드가 포함되면 크롤링 단계에서 자동 제외</p>
+      </div>
+      <div style="max-height:400px;overflow-y:auto">
+        <table>
+          <thead><tr><th>키워드</th><th>설명</th></tr></thead>
+          <tbody id="blogFilterTableBody"><tr><td colspan="2" class="loading"><div class="spinner"></div>로딩 중...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <a href="https://docs.google.com/spreadsheets/d/1umUs3Ouh1iRXTvFyTtJhuyACyxOG8pvS2iwztOqiORg/edit#gid=0" target="_blank" id="blogFilterEditLink">구글 시트에서 편집하기 →</a>
+      </div>
+    </div>
+
+    <div class="table-box">
+      <div class="table-header">
+        <h3>이메일 차단 목록</h3>
+        <p>아래 이메일 주소는 크롤링 + 발송 양쪽에서 자동 제외</p>
+      </div>
+      <div style="max-height:400px;overflow-y:auto">
+        <table>
+          <thead><tr><th>이메일</th><th>사유</th></tr></thead>
+          <tbody id="emailFilterTableBody"><tr><td colspan="2" class="loading"><div class="spinner"></div>로딩 중...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <a href="https://docs.google.com/spreadsheets/d/1umUs3Ouh1iRXTvFyTtJhuyACyxOG8pvS2iwztOqiORg/edit#gid=0" target="_blank" id="emailFilterEditLink">구글 시트에서 편집하기 →</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert-item alert-info" style="margin-top:16px">
+    <span class="icon">💡</span>
+    <span class="text"><strong>사용법:</strong> 구글 시트의 '블로그명필터' / '이메일필터' 탭에서 A열에 키워드나 이메일을 추가/삭제하세요. 다음 자동화 실행(매일 05:00)부터 자동 반영됩니다.</span>
+  </div>
+</div>
+
 <!-- ===== SETTINGS ===== -->
 <div id="tab-settings" class="hidden">
   <div class="settings-card">
@@ -244,6 +305,8 @@ const FORM_SHEET_ID = '1kGR61pvUusxNrJ6Qo2Wg8GOEXGVNRvFe2Kqyum7NbEU';
 // 시트명 (탭 이름) — 실제 시트에 맞게 수정 필요
 const HISTORY_TAB = '발송이력';
 const FORM_TAB = '설문지 응답 시트1';
+const BLOG_FILTER_TAB = '블로그명필터';
+const EMAIL_FILTER_TAB = '이메일필터';
 
 const HOSPITALS = {
   '리앤델의원': {color:'#4285f4', field:'피부/리쥬란'},
@@ -267,6 +330,8 @@ const LAUNCH_DATE = '2026-03-27';
 // 저장용 전역 변수
 let historyData = [];
 let formData = [];
+let blogFilterData = [];
+let emailFilterData = [];
 let chartInstances = {};
 
 // ===== 탭 전환 =====
@@ -317,9 +382,11 @@ async function fetchSheet(sheetId, tabName) {
 async function loadAllData() {
   document.getElementById('dataStatus').textContent = '데이터 로딩 중...';
 
-  const [historyResult, formResult] = await Promise.all([
+  const [historyResult, formResult, blogFilterResult, emailFilterResult] = await Promise.all([
     fetchSheet(HISTORY_SHEET_ID, HISTORY_TAB),
-    fetchSheet(FORM_SHEET_ID, FORM_TAB)
+    fetchSheet(FORM_SHEET_ID, FORM_TAB),
+    fetchSheet(HISTORY_SHEET_ID, BLOG_FILTER_TAB),
+    fetchSheet(HISTORY_SHEET_ID, EMAIL_FILTER_TAB)
   ]);
 
   if (historyResult) {
@@ -339,6 +406,14 @@ async function loadAllData() {
       const rowDate = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
       return rowDate >= LAUNCH_DATE;
     });
+  }
+
+  // 필터 데이터
+  if (blogFilterResult) {
+    blogFilterData = blogFilterResult.rows;
+  }
+  if (emailFilterResult) {
+    emailFilterData = emailFilterResult.rows;
   }
 
   renderAll();
@@ -450,6 +525,9 @@ function renderAll() {
 
   // 키워드 인사이트
   renderInsight(stats);
+
+  // 필터
+  renderFilters();
 
   // 차트
   renderCharts(stats);
@@ -563,6 +641,40 @@ function renderInsight(stats) {
     <div class="alert-item alert-info" style="margin-bottom:10px"><span class="icon">🏆</span><span class="text"><strong>최다 추출 키워드: "${topKw[0]}"</strong> — ${topKw[1].crawl}건 크롤링, 성공률 ${(topKw[1].success/topKw[1].crawl*100).toFixed(0)}%</span></div>
     <div class="alert-item alert-ok"><span class="icon">🎯</span><span class="text"><strong>추천</strong> — 상위 키워드의 검색 수를 확대하면 더 많은 블로거를 확보할 수 있습니다</span></div>
   `;
+}
+
+function renderFilters() {
+  // 블로그명 필터
+  const blogEl = document.getElementById('blogFilterTableBody');
+  const blogCount = blogFilterData.length;
+  document.getElementById('filterBlogCount').textContent = blogCount;
+
+  if (blogCount === 0) {
+    blogEl.innerHTML = '<tr><td colspan="2" style="text-align:center;padding:30px;color:#9ca3af">필터 탭이 없거나 데이터가 없습니다</td></tr>';
+  } else {
+    blogEl.innerHTML = blogFilterData.map(r => {
+      const kw = r['필터키워드'] || Object.values(r)[0] || '';
+      const desc = r['설명'] || Object.values(r)[1] || '';
+      return `<tr><td><span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;font-size:11px">${kw}</span></td><td style="color:#9ca3af;font-size:11px">${desc || '-'}</td></tr>`;
+    }).join('');
+  }
+
+  // 이메일 필터
+  const emailEl = document.getElementById('emailFilterTableBody');
+  const emailCount = emailFilterData.length;
+  document.getElementById('filterEmailCount').textContent = emailCount;
+
+  if (emailCount === 0) {
+    emailEl.innerHTML = '<tr><td colspan="2" style="text-align:center;padding:30px;color:#9ca3af">필터 탭이 없거나 데이터가 없습니다</td></tr>';
+  } else {
+    emailEl.innerHTML = emailFilterData.map(r => {
+      const em = r['이메일'] || Object.values(r)[0] || '';
+      const reason = r['사유'] || Object.values(r)[1] || '';
+      // 이메일 마스킹
+      const masked = em.length > 8 ? em.substring(0,4) + '***' + em.substring(em.indexOf('@')) : em;
+      return `<tr><td style="font-family:monospace;font-size:11px">${masked}</td><td style="color:#9ca3af;font-size:11px">${reason || '-'}</td></tr>`;
+    }).join('');
+  }
 }
 
 function renderCharts(stats) {
