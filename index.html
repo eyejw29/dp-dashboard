@@ -318,11 +318,14 @@ function normalizeHospital(col) {
   if (col.includes('와이퀸')) return '와이퀸 산부인과';
   if (col.includes('오썸')) return '오썸 성형외과';
   if (col.includes('그램')) return '그램한의원';
-  if (col.includes('예몸')) return '예몸의원';
+  if (col.includes('예몸')) return null; // 예몸 제외
   return null;
 }
 
-// 블로그 ID 추출 (URL 또는 순수 ID)
+// 숨김 처리할 병원 (데이터는 수집하되 UI에 표시 안 함)
+const HIDDEN_HOSPITALS = ['컴포트 성형외과'];
+
+// 블로그 ID 추출 (URL, 순수 ID, 또는 블로거ID 컬럼 값)
 function extractBlogId(input) {
   if (!input) return '';
   const s = String(input).trim();
@@ -342,10 +345,9 @@ function extractBlogId(input) {
 const HOSPITALS = {
   '리앤델 클리닉': {color:'#4285f4', field:'피부/리쥬란'},
   '그램한의원': {color:'#ea4335', field:'다이어트/한방'},
-  '컴포트 성형외과': {color:'#fbbc04', field:'쥬베룩/리프팅'},
+  '컴포트 성형외과': {color:'#fbbc04', field:'쥬베룩/리프팅', hidden:true},
   '와이퀸 산부인과': {color:'#34a853', field:'여성건강/레이저'},
-  '오썸 성형외과': {color:'#7c3aed', field:'코성형/윤곽'},
-  '예몸의원': {color:'#f97316', field:'지방흡입'}
+  '오썸 성형외과': {color:'#7c3aed', field:'코성형/윤곽'}
 };
 
 const SUBJECTS = [
@@ -503,13 +505,15 @@ function analyzeData() {
   const hospitalResponses = {};
   Object.keys(HOSPITALS).forEach(h => hospitalResponses[h] = 0);
 
-  // 블로그ID 기반 전환 추적
+  // 블로그ID 기반 전환 추적 — 블로거ID 또는 블로그URL 컬럼 사용
   const blogColIdx = formCols.indexOf('블로그주소');
   const sentBlogIds = new Set();
   historyData.forEach(r => {
-    const blog = r['블로그명'] || r['블로그'] || '';
-    const id = extractBlogId(blog);
-    if (id) sentBlogIds.add(id);
+    // 우선순위: 블로거ID > 블로그URL > 블로그명
+    const id = r['블로거ID'] || '';
+    const url = r['블로그URL'] || '';
+    const blogId = id ? id.toLowerCase() : extractBlogId(url || r['블로그명'] || r['블로그'] || '');
+    if (blogId) sentBlogIds.add(blogId);
   });
   const convertedBlogIds = new Set();
 
@@ -543,13 +547,15 @@ function analyzeData() {
 
   historyData.forEach(r => {
     const d = String(r['발송일시'] || r['날짜'] || '');
-    const keys = Object.keys(dailyMap);
-    keys.forEach(k => {
-      if (d.includes(k)) {
+    // "2026-03-27 0:10:49" 또는 "2026/03/27" 형식에서 MM/DD 추출
+    const dm = d.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if (dm) {
+      const k = dm[2].padStart(2,'0') + '/' + dm[3].padStart(2,'0');
+      if (dailyMap[k]) {
         dailyMap[k].sent++;
         if (String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('실패')) dailyMap[k].fail++;
       }
-    });
+    }
   });
 
   // 일별 실패 집계 (알림용)
@@ -569,11 +575,12 @@ function analyzeData() {
   const blogToKw = {};
   historyData.forEach(r => {
     const kw = r['검색 키워드'] || r['키워드'] || r['검색키워드'] || '미분류';
-    const blog = r['블로그명'] || r['블로그'] || '';
-    const id = extractBlogId(blog);
-    if (id) {
-      if (!blogToKw[id]) blogToKw[id] = new Set();
-      blogToKw[id].add(kw);
+    const id = r['블로거ID'] || '';
+    const url = r['블로그URL'] || '';
+    const blogId = id ? id.toLowerCase() : extractBlogId(url || r['블로그명'] || r['블로그'] || '');
+    if (blogId) {
+      if (!blogToKw[blogId]) blogToKw[blogId] = new Set();
+      blogToKw[blogId].add(kw);
     }
   });
   convertedBlogIds.forEach(blogId => {
@@ -673,7 +680,7 @@ function renderAlerts(stats) {
 
 function renderReactCards(stats) {
   const el = document.getElementById('reactCards');
-  const entries = Object.entries(stats.hospitalResponses).sort((a,b) => b[1]-a[1]);
+  const entries = Object.entries(stats.hospitalResponses).filter(([h]) => !HIDDEN_HOSPITALS.includes(h)).sort((a,b) => b[1]-a[1]);
   const maxResp = Math.max(...entries.map(e => e[1]), 1);
 
   el.innerHTML = entries.map(([name, count], i) => {
@@ -693,7 +700,7 @@ function renderReactCards(stats) {
 
 function renderResponseTable(stats) {
   const el = document.getElementById('responseTableBody');
-  const entries = Object.entries(stats.hospitalResponses).sort((a,b) => b[1]-a[1]);
+  const entries = Object.entries(stats.hospitalResponses).filter(([h]) => !HIDDEN_HOSPITALS.includes(h)).sort((a,b) => b[1]-a[1]);
   document.getElementById('responseTableDesc').textContent = `캠페인 후 폼 응답 ${stats.totalResponse}건 기준 | 업체별 선택 집계 (1인 복수 업체 가능)`;
 
   let html = entries.map(([name, count]) => {
@@ -733,7 +740,13 @@ function renderHistoryTable() {
 
 function renderInsight(stats) {
   const el = document.getElementById('insightTableBody');
-  const entries = Object.entries(stats.kwMap).sort((a,b) => b[1].crawl - a[1].crawl).slice(0, 15);
+  // 폼 응답 수 기준 정렬 (응답 있는 키워드 우선, 그 다음 크롤링 수)
+  const entries = Object.entries(stats.kwMap).sort((a,b) => {
+    const fa = stats.kwFormCount[a[0]] || 0;
+    const fb = stats.kwFormCount[b[0]] || 0;
+    if (fb !== fa) return fb - fa;
+    return b[1].crawl - a[1].crawl;
+  }).slice(0, 15);
 
   if (entries.length === 0) {
     el.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#9ca3af">키워드 데이터가 쌓이면 자동 분석됩니다</td></tr>';
@@ -751,13 +764,18 @@ function renderInsight(stats) {
     return `<tr><td><strong>${kw}</strong></td><td>${data.crawl}</td><td>${data.success}</td><td>${formCount}</td><td>${rate}%</td><td>${tag}</td></tr>`;
   }).join('');
 
-  // 자동 인사이트
+  // 자동 인사이트 — 폼 응답 기준
   const insights = document.getElementById('autoInsights');
   const topKw = entries[0];
-  insights.innerHTML = `
-    <div class="alert-item alert-info" style="margin-bottom:10px"><span class="icon">🏆</span><span class="text"><strong>최다 추출 키워드: "${topKw[0]}"</strong> — ${topKw[1].crawl}건 크롤링, 성공률 ${(topKw[1].success/topKw[1].crawl*100).toFixed(0)}%</span></div>
-    <div class="alert-item alert-ok"><span class="icon">🎯</span><span class="text"><strong>추천</strong> — 상위 키워드의 검색 수를 확대하면 더 많은 블로거를 확보할 수 있습니다</span></div>
-  `;
+  const topFormCount = stats.kwFormCount[topKw[0]] || 0;
+  let insightHtml = '';
+  if (topFormCount > 0) {
+    insightHtml += `<div class="alert-item alert-info" style="margin-bottom:10px"><span class="icon">🏆</span><span class="text"><strong>최고 전환 키워드: "${topKw[0]}"</strong> — ${topFormCount}명 폼 응답 (발송 ${topKw[1].success}건 중)</span></div>`;
+  } else {
+    insightHtml += `<div class="alert-item alert-info" style="margin-bottom:10px"><span class="icon">🏆</span><span class="text"><strong>최다 추출 키워드: "${topKw[0]}"</strong> — ${topKw[1].crawl}건 크롤링, 발송 ${topKw[1].success}건</span></div>`;
+  }
+  insightHtml += `<div class="alert-item alert-ok"><span class="icon">🎯</span><span class="text"><strong>추천</strong> — 폼 응답이 높은 키워드의 검색 수를 확대하면 전환율을 높일 수 있습니다</span></div>`;
+  insights.innerHTML = insightHtml;
 }
 
 function renderFilters() {
@@ -831,8 +849,8 @@ function renderCharts(stats) {
     options:{responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,grid:{color:'#f0f0f0'}},x:{grid:{display:false}}}}
   });
 
-  // 업체별 폼 응답 분포
-  const hospNames = Object.keys(stats.hospitalResponses);
+  // 업체별 폼 응답 분포 (숨김 병원 제외)
+  const hospNames = Object.keys(stats.hospitalResponses).filter(h => !HIDDEN_HOSPITALS.includes(h));
   const hospCounts = hospNames.map(h => stats.hospitalResponses[h]);
   const hospColors = hospNames.map(h => HOSPITALS[h]?.color || '#9ca3af');
 
