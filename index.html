@@ -391,9 +391,10 @@ function parseSheetJSON(text) {
   if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || '시트 오류');
 
   const cols = json.table.cols.map(c => c.label || '');
-  // rawRows: 배열 형태 (중복 컬럼 문제 없음)
+  // rawRows: 배열 형태 — cell.f(포맷값) 우선, 없으면 cell.v 사용
+  // gviz는 날짜를 "Date(2023,11,28,10,7,31)" 형태로 반환하므로 f값이 필요
   const rawRows = json.table.rows.map(row =>
-    row.c.map(cell => cell ? (cell.v ?? '') : '')
+    row.c.map(cell => cell ? (cell.f ?? cell.v ?? '') : '')
   );
   // rows: 객체 형태 (중복 컬럼은 마지막 값으로 덮어씌워짐 — 발송이력용)
   const rows = rawRows.map(cells => {
