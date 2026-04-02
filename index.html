@@ -302,18 +302,50 @@ tbody tr:hover{background:#fafafa}
 const HISTORY_SHEET_ID = '1umUs3Ouh1iRXTvFyTtJhuyACyxOG8pvS2iwztOqiORg';
 const FORM_SHEET_ID = '1kGR61pvUusxNrJ6Qo2Wg8GOEXGVNRvFe2Kqyum7NbEU';
 
-// 시트명 (탭 이름) — 실제 시트에 맞게 수정 필요
+// 시트명 (탭 이름)
 const HISTORY_TAB = '발송이력';
-const FORM_TAB = '설문지 응답 시트1';
+const FORM_TAB = '통합';
 const BLOG_FILTER_TAB = '블로그명필터';
 const EMAIL_FILTER_TAB = '이메일필터';
 
+// 폼 컬럼 중 병원이 아닌 컬럼 (스킵 대상)
+const FORM_SKIP_COLS = ['타임스탬프','성함','연락처','블로그주소','지수','개인정보 및 마케팅 활용 동의','지방흡입 원하는 시술 부위 사진 업로드','Timestamp',''];
+
+// 폼 컬럼명 → 정규화된 병원명 매핑
+function normalizeHospital(col) {
+  if (col.includes('리앤델')) return '리앤델 클리닉';
+  if (col.includes('컴포트')) return '컴포트 성형외과';
+  if (col.includes('와이퀸')) return '와이퀸 산부인과';
+  if (col.includes('오썸')) return '오썸 성형외과';
+  if (col.includes('그램')) return '그램한의원';
+  if (col.includes('예몸')) return '예몸의원';
+  return null;
+}
+
+// 블로그 ID 추출 (URL 또는 순수 ID)
+function extractBlogId(input) {
+  if (!input) return '';
+  const s = String(input).trim();
+  const m = s.match(/blog\.naver\.com\/([^/?#]+)/);
+  if (m) {
+    const id = m[1];
+    if (['PostList.naver','postlist','NBlogList.naver'].some(x => id.toLowerCase().startsWith(x.toLowerCase()))) {
+      const p = s.match(/blogId=([^&]+)/);
+      return p ? p[1].toLowerCase() : '';
+    }
+    return id.toLowerCase();
+  }
+  if (!s.includes('/') && !s.includes('.') && s.length < 30) return s.toLowerCase();
+  return s.toLowerCase();
+}
+
 const HOSPITALS = {
-  '리앤델의원': {color:'#4285f4', field:'피부/리쥬란'},
+  '리앤델 클리닉': {color:'#4285f4', field:'피부/리쥬란'},
   '그램한의원': {color:'#ea4335', field:'다이어트/한방'},
-  '컴포트의원': {color:'#fbbc04', field:'쥬베룩/리프팅'},
-  '와이퀸산부인과': {color:'#34a853', field:'여성건강/레이저'},
-  '오썸성형외과': {color:'#7c3aed', field:'코성형/윤곽'}
+  '컴포트 성형외과': {color:'#fbbc04', field:'쥬베룩/리프팅'},
+  '와이퀸 산부인과': {color:'#34a853', field:'여성건강/레이저'},
+  '오썸 성형외과': {color:'#7c3aed', field:'코성형/윤곽'},
+  '예몸의원': {color:'#f97316', field:'지방흡입'}
 };
 
 const SUBJECTS = [
@@ -330,6 +362,8 @@ const LAUNCH_DATE = '2026-03-27';
 // 저장용 전역 변수
 let historyData = [];
 let formData = [];
+let formCols = [];
+let formRawRows = [];
 let blogFilterData = [];
 let emailFilterData = [];
 let chartInstances = {};
@@ -357,14 +391,17 @@ function parseSheetJSON(text) {
   if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || '시트 오류');
 
   const cols = json.table.cols.map(c => c.label || '');
-  const rows = json.table.rows.map(row => {
+  // rawRows: 배열 형태 (중복 컬럼 문제 없음)
+  const rawRows = json.table.rows.map(row =>
+    row.c.map(cell => cell ? (cell.v ?? '') : '')
+  );
+  // rows: 객체 형태 (중복 컬럼은 마지막 값으로 덮어씌워짐 — 발송이력용)
+  const rows = rawRows.map(cells => {
     const obj = {};
-    row.c.forEach((cell, i) => {
-      obj[cols[i]] = cell ? (cell.v ?? '') : '';
-    });
+    cells.forEach((val, i) => { obj[cols[i]] = val; });
     return obj;
   });
-  return { cols, rows };
+  return { cols, rows, rawRows };
 }
 
 async function fetchSheet(sheetId, tabName) {
@@ -397,15 +434,16 @@ async function loadAllData() {
   }
 
   if (formResult) {
-    // 시행 시작일 이후 응답만 필터링
-    formData = formResult.rows.filter(r => {
-      const ts = String(r['타임스탬프'] || r['Timestamp'] || Object.values(r)[0] || '');
-      // 날짜 형식: "2026. 3. 27" 또는 "2026/3/27" 또는 "2026-03-27" 등
+    formCols = formResult.cols;
+    // 시행 시작일 이후 응답만 필터링 (rawRows 사용 — 중복 컬럼 안전)
+    formRawRows = formResult.rawRows.filter(cells => {
+      const ts = String(cells[0] || '');
       const dateMatch = ts.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/);
       if (!dateMatch) return false;
       const rowDate = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
       return rowDate >= LAUNCH_DATE;
     });
+    formData = formRawRows; // 호환용
   }
 
   // 필터 데이터
@@ -441,7 +479,7 @@ function analyzeData() {
   const todaySent = todayHistory.length;
   const totalSuccess = historyData.filter(r => String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('성공')).length;
   const totalFail = historyData.filter(r => String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('실패')).length;
-  const totalResponse = formData.length;
+  const totalResponse = formRawRows.length;
 
   // 키워드별 집계
   const kwMap = {};
@@ -453,19 +491,46 @@ function analyzeData() {
     if (String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('성공')) kwMap[kw].success++;
   });
 
-  // 폼 응답에서 업체별 집계
+  // 폼 응답에서 업체별 집계 (컬럼 인덱스 기반 — 중복 컬럼 안전)
+  const hospitalColMap = []; // [{idx, normalized}]
+  formCols.forEach((col, idx) => {
+    if (FORM_SKIP_COLS.includes(col)) return;
+    const norm = normalizeHospital(col);
+    if (norm) hospitalColMap.push({ idx, normalized: norm });
+  });
+
   const hospitalResponses = {};
   Object.keys(HOSPITALS).forEach(h => hospitalResponses[h] = 0);
 
-  formData.forEach(r => {
-    // 폼 응답에서 업체명이 포함된 컬럼 찾기
-    const vals = Object.values(r).map(String);
-    Object.keys(HOSPITALS).forEach(h => {
-      if (vals.some(v => v.includes(h) || v.includes(h.replace('의원','').replace('한의원','').replace('산부인과','').replace('성형외과','')))) {
-        hospitalResponses[h]++;
+  // 블로그ID 기반 전환 추적
+  const blogColIdx = formCols.indexOf('블로그주소');
+  const sentBlogIds = new Set();
+  historyData.forEach(r => {
+    const blog = r['블로그명'] || r['블로그'] || '';
+    const id = extractBlogId(blog);
+    if (id) sentBlogIds.add(id);
+  });
+  const convertedBlogIds = new Set();
+
+  formRawRows.forEach(cells => {
+    const counted = new Set();
+    hospitalColMap.forEach(({ idx, normalized }) => {
+      const val = String(cells[idx] || '').trim();
+      if (val && !counted.has(normalized)) {
+        hospitalResponses[normalized] = (hospitalResponses[normalized] || 0) + 1;
+        counted.add(normalized);
       }
     });
+    // 전환 추적: 발송된 블로거인지 확인
+    if (blogColIdx >= 0) {
+      const formBlogId = extractBlogId(cells[blogColIdx]);
+      if (formBlogId && sentBlogIds.has(formBlogId)) {
+        convertedBlogIds.add(formBlogId);
+      }
+    }
   });
+
+  const uniqueConverted = convertedBlogIds.size;
 
   // 일별 집계 (최근 7일)
   const dailyMap = {};
@@ -486,7 +551,7 @@ function analyzeData() {
     });
   });
 
-  return { totalSent, todaySent, totalSuccess, totalFail, totalResponse, kwMap, hospitalResponses, dailyMap };
+  return { totalSent, todaySent, totalSuccess, totalFail, totalResponse, kwMap, hospitalResponses, dailyMap, uniqueConverted };
 }
 
 // ===== 렌더링 =====
@@ -503,13 +568,13 @@ function renderAll() {
   document.getElementById('statSentRate').textContent = stats.totalSent > 0 ? `성공률 ${(stats.totalSuccess/stats.totalSent*100).toFixed(1)}%` : '-';
   document.getElementById('statFail').textContent = stats.totalFail;
   document.getElementById('statResponse').textContent = stats.totalResponse;
-  const convRate = stats.totalSuccess > 0 ? (stats.totalResponse/stats.totalSuccess*100).toFixed(1) : '0';
+  const convRate = stats.totalSuccess > 0 ? (stats.uniqueConverted/stats.totalSuccess*100).toFixed(1) : '0';
   document.getElementById('statConversion').textContent = convRate + '%';
 
   // 퍼널
   document.getElementById('funnelSent').textContent = stats.totalSuccess + '건';
-  document.getElementById('funnelResponse').textContent = stats.totalResponse + '명';
-  document.getElementById('funnelRate').textContent = `전체 전환율 ${convRate}%`;
+  document.getElementById('funnelResponse').textContent = stats.uniqueConverted + '명 (고유)';
+  document.getElementById('funnelRate').textContent = `매칭 전환율 ${convRate}% (${stats.uniqueConverted}/${stats.totalSuccess}명)`;
 
   // 알림
   renderAlerts(stats);
