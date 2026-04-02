@@ -160,7 +160,7 @@ tbody tr:hover{background:#fafafa}
       <h3>업체별 상세 반응도</h3>
       <p id="responseTableDesc">공통 메일 기준 | 폼 응답에서 선택한 업체별 집계</p>
     </div>
-    <table><thead><tr><th>업체명</th><th>분야</th><th>총 발송</th><th>폼 응답</th><th>반응률</th></tr></thead>
+    <table><thead><tr><th>업체명</th><th>분야</th><th>폼 응답</th><th>응답 비중</th><th>발송 대비</th></tr></thead>
     <tbody id="responseTableBody"></tbody>
     </table>
   </div>
@@ -552,7 +552,38 @@ function analyzeData() {
     });
   });
 
-  return { totalSent, todaySent, totalSuccess, totalFail, totalResponse, kwMap, hospitalResponses, dailyMap, uniqueConverted };
+  // 일별 실패 집계 (알림용)
+  const failByDate = {};
+  historyData.forEach(r => {
+    if (String(r['발송 상태'] || r['상태'] || r['결과'] || '').includes('실패')) {
+      const d = String(r['발송일시'] || r['날짜'] || '').match(/(\d{2,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+      if (d) {
+        const key = `${d[2].padStart(2,'0')}/${d[3].padStart(2,'0')}`;
+        failByDate[key] = (failByDate[key] || 0) + 1;
+      }
+    }
+  });
+
+  // 키워드별 폼 응답 매칭: 발송이력의 키워드 → 블로그ID → 폼 응답 여부
+  const kwFormCount = {};
+  const blogToKw = {};
+  historyData.forEach(r => {
+    const kw = r['검색 키워드'] || r['키워드'] || r['검색키워드'] || '미분류';
+    const blog = r['블로그명'] || r['블로그'] || '';
+    const id = extractBlogId(blog);
+    if (id) {
+      if (!blogToKw[id]) blogToKw[id] = new Set();
+      blogToKw[id].add(kw);
+    }
+  });
+  convertedBlogIds.forEach(blogId => {
+    const kws = blogToKw[blogId];
+    if (kws) {
+      kws.forEach(kw => { kwFormCount[kw] = (kwFormCount[kw] || 0) + 1; });
+    }
+  });
+
+  return { totalSent, todaySent, totalSuccess, totalFail, totalResponse, kwMap, hospitalResponses, dailyMap, uniqueConverted, failByDate, kwFormCount };
 }
 
 // ===== 렌더링 =====
@@ -572,10 +603,10 @@ function renderAll() {
   const convRate = stats.totalSuccess > 0 ? (stats.uniqueConverted/stats.totalSuccess*100).toFixed(1) : '0';
   document.getElementById('statConversion').textContent = convRate + '%';
 
-  // 퍼널
+  // 퍼널 — 발송 대비 폼 응답 (고유 전환)
   document.getElementById('funnelSent').textContent = stats.totalSuccess + '건';
-  document.getElementById('funnelResponse').textContent = stats.uniqueConverted + '명 (고유)';
-  document.getElementById('funnelRate').textContent = `매칭 전환율 ${convRate}% (${stats.uniqueConverted}/${stats.totalSuccess}명)`;
+  document.getElementById('funnelResponse').textContent = stats.totalResponse + '명';
+  document.getElementById('funnelRate').textContent = `매칭 전환 ${stats.uniqueConverted}명 (${convRate}%) · 폼 응답 ${stats.totalResponse}건`;
 
   // 알림
   renderAlerts(stats);
@@ -599,21 +630,41 @@ function renderAll() {
   renderCharts(stats);
 }
 
+// 확인한 실패 알림 저장 (세션 내 메모리)
+const dismissedFailAlerts = new Set();
+
+function dismissFailAlert(dateKey) {
+  dismissedFailAlerts.add(dateKey);
+  const alertEl = document.getElementById('fail-alert-' + dateKey.replace('/','-'));
+  if (alertEl) alertEl.style.display = 'none';
+}
+
 function renderAlerts(stats) {
   const el = document.getElementById('alertSection');
   let html = '';
 
-  if (stats.totalFail > 0) {
-    html += `<div class="alert-warn alert-item"><span class="icon">⚠️</span><span class="text"><strong>발송 실패 ${stats.totalFail}건</strong> — 오류 확인 탭에서 상세 내용을 확인하세요</span><span class="time">자동 감지</span></div>`;
-  }
+  // 날짜별 실패 알림 (확인하지 않은 것만)
+  const failEntries = Object.entries(stats.failByDate || {}).sort((a,b) => b[0].localeCompare(a[0]));
+  failEntries.forEach(([dateKey, count]) => {
+    const dismissed = dismissedFailAlerts.has(dateKey);
+    const display = dismissed ? 'display:none' : '';
+    html += `<div class="alert-warn alert-item" id="fail-alert-${dateKey.replace('/','-')}" style="${display}">
+      <span class="icon">⚠️</span>
+      <span class="text"><strong>${dateKey} — ${count}건 발송 실패</strong></span>
+      <button onclick="dismissFailAlert('${dateKey}')" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:2px 10px;font-size:11px;cursor:pointer;color:#92400e;margin-left:auto;flex-shrink:0">확인</button>
+    </div>`;
+  });
+
   if (stats.totalSuccess > 0) {
     html += `<div class="alert-ok alert-item"><span class="icon">✅</span><span class="text"><strong>발송 정상</strong> — 총 ${stats.totalSuccess}건 발송 성공</span><span class="time">자동 감지</span></div>`;
   }
   if (stats.totalResponse > 0) {
     const topHospital = Object.entries(stats.hospitalResponses).sort((a,b) => b[1]-a[1])[0];
-    html += `<div class="alert-info alert-item"><span class="icon">💡</span><span class="text"><strong>인사이트</strong> — ${topHospital[0]}이(가) 가장 높은 반응 (${topHospital[1]}건). 관련 키워드 확대 추천</span><span class="time">자동 분석</span></div>`;
+    if (topHospital && topHospital[1] > 0) {
+      html += `<div class="alert-info alert-item"><span class="icon">💡</span><span class="text"><strong>인사이트</strong> — ${topHospital[0]}이(가) 가장 높은 반응 (${topHospital[1]}건). 관련 키워드 확대 추천</span><span class="time">자동 분석</span></div>`;
+    }
   }
-  if (historyData.length === 0 && formData.length === 0) {
+  if (historyData.length === 0 && formRawRows.length === 0) {
     html += `<div class="alert-info alert-item"><span class="icon">📡</span><span class="text"><strong>데이터 대기 중</strong> — 구글 시트에 발송 데이터가 쌓이면 자동으로 표시됩니다</span><span class="time">시스템</span></div>`;
   }
 
@@ -626,15 +677,15 @@ function renderReactCards(stats) {
   const maxResp = Math.max(...entries.map(e => e[1]), 1);
 
   el.innerHTML = entries.map(([name, count], i) => {
-    const rate = stats.totalSuccess > 0 ? (count/stats.totalSuccess*100).toFixed(1) : '0';
+    const rate = stats.totalResponse > 0 ? (count/stats.totalResponse*100).toFixed(1) : '0';
     const barW = (count/maxResp*100).toFixed(0);
     const color = HOSPITALS[name]?.color || '#9ca3af';
     return `<div class="react-card">
       <div class="react-rank">#${i+1}</div>
       <div class="hospital-name" style="color:${color}">${name}</div>
       <div style="font-size:10px;color:#9ca3af;margin-bottom:6px">${HOSPITALS[name]?.field || ''}</div>
-      <div class="react-value" style="color:${color}">${rate}%</div>
-      <div class="react-count">${count}명 / ${stats.totalSuccess}건 발송</div>
+      <div class="react-value" style="color:${color}">${count}명</div>
+      <div class="react-count">전체 ${stats.totalResponse}명 중 ${rate}%</div>
       <div class="react-bar"><div class="react-bar-fill" style="width:${barW}%;background:${color}"></div></div>
     </div>`;
   }).join('');
@@ -643,17 +694,17 @@ function renderReactCards(stats) {
 function renderResponseTable(stats) {
   const el = document.getElementById('responseTableBody');
   const entries = Object.entries(stats.hospitalResponses).sort((a,b) => b[1]-a[1]);
-  document.getElementById('responseTableDesc').textContent = `공통 메일 총 ${stats.totalSuccess}건 발송 기준 | 폼 응답에서 선택한 업체별 집계`;
+  document.getElementById('responseTableDesc').textContent = `캠페인 후 폼 응답 ${stats.totalResponse}건 기준 | 업체별 선택 집계 (1인 복수 업체 가능)`;
 
   let html = entries.map(([name, count]) => {
-    const rate = stats.totalSuccess > 0 ? (count/stats.totalSuccess*100).toFixed(1) : '0';
+    const rate = stats.totalResponse > 0 ? (count/stats.totalResponse*100).toFixed(1) : '0';
+    const convRate = stats.totalSuccess > 0 ? (count/stats.totalSuccess*100).toFixed(1) : '0';
     const color = HOSPITALS[name]?.color || '#374151';
-    return `<tr><td><strong style="color:${color}">${name}</strong></td><td>${HOSPITALS[name]?.field || ''}</td><td>${stats.totalSuccess}</td><td style="font-weight:700">${count}</td><td style="color:#15803d;font-weight:700">${rate}%</td></tr>`;
+    return `<tr><td><strong style="color:${color}">${name}</strong></td><td>${HOSPITALS[name]?.field || ''}</td><td style="font-weight:700">${count}</td><td>${rate}%</td><td style="color:#15803d;font-weight:700">${convRate}%</td></tr>`;
   }).join('');
 
   const totalResp = entries.reduce((s,e) => s + e[1], 0);
-  const totalRate = stats.totalSuccess > 0 ? (totalResp/stats.totalSuccess*100).toFixed(1) : '0';
-  html += `<tr style="background:#f9fafb;font-weight:700"><td>합계</td><td>—</td><td>${stats.totalSuccess}</td><td>${totalResp}</td><td style="color:#7c3aed">${totalRate}%</td></tr>`;
+  html += `<tr style="background:#f9fafb;font-weight:700"><td>합계</td><td>—</td><td>${totalResp}</td><td>—</td><td style="color:#7c3aed">${stats.uniqueConverted}명 전환</td></tr>`;
 
   el.innerHTML = html;
 }
@@ -690,8 +741,8 @@ function renderInsight(stats) {
   }
 
   el.innerHTML = entries.map(([kw, data]) => {
-    // 폼 응답에서 해당 키워드 매칭 (근사치)
-    const formCount = 0; // 폼 데이터에 키워드 매칭 로직 필요
+    // 키워드로 발송한 블로거 중 폼 응답한 수 (블로그ID 매칭 기반)
+    const formCount = stats.kwFormCount[kw] || 0;
     const rate = data.success > 0 ? (formCount/data.success*100).toFixed(1) : '0';
     let tag = '<span class="kw-tag">미응답</span>';
     if (parseFloat(rate) >= 30) tag = '<span class="kw-tag hot">🔥 최고</span>';
@@ -748,10 +799,24 @@ function renderCharts(stats) {
   Object.values(chartInstances).forEach(c => c.destroy());
   chartInstances = {};
 
-  // 일별 추이
+  // 일별 추이 (폼 응답 포함)
   const dailyLabels = Object.keys(stats.dailyMap);
   const dailySent = dailyLabels.map(k => stats.dailyMap[k].sent);
   const dailyFail = dailyLabels.map(k => stats.dailyMap[k].fail);
+
+  // 일별 폼 응답 집계
+  const dailyForm = dailyLabels.map(dateKey => {
+    let count = 0;
+    formRawRows.forEach(cells => {
+      const ts = String(cells[0] || '');
+      const m = ts.match(/(\d{1,2})\.\s*(\d{1,2})/);
+      if (m) {
+        const fk = m[1].padStart(2,'0') + '/' + m[2].padStart(2,'0');
+        if (fk === dateKey) count++;
+      }
+    });
+    return count;
+  });
 
   chartInstances.daily = new Chart(document.getElementById('dailyChart'), {
     type: 'line',
@@ -759,7 +824,8 @@ function renderCharts(stats) {
       labels: dailyLabels,
       datasets: [
         {label:'발송', data: dailySent, borderColor:'#34a853', backgroundColor:'rgba(52,168,83,.1)', fill:true, tension:.3, pointRadius:4},
-        {label:'실패', data: dailyFail, borderColor:'#ea4335', backgroundColor:'rgba(234,67,53,.1)', fill:true, tension:.3, pointRadius:4}
+        {label:'실패', data: dailyFail, borderColor:'#ea4335', backgroundColor:'rgba(234,67,53,.1)', fill:true, tension:.3, pointRadius:4},
+        {label:'폼 응답', data: dailyForm, borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,.1)', fill:false, tension:.3, pointRadius:5, borderWidth:2, borderDash:[5,3]}
       ]
     },
     options:{responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,grid:{color:'#f0f0f0'}},x:{grid:{display:false}}}}
