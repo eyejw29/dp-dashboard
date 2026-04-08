@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>고운하지 흉부외과 — 체험단 대시보드</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:#faf7f5;color:#333;min-height:100vh}
+.header{background:#fff;border-bottom:1px solid #e8e0da;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px;font-weight:700;color:#2d2319}
+.header h1 span{color:#b5745a;font-weight:400;font-size:13px;margin-left:8px}
+.header p{font-size:12px;color:#a09080;margin-top:2px}
+.header-right{display:flex;align-items:center;gap:12px}
+.back-btn{background:#f0e8e0;color:#8b6f5a;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;text-decoration:none;font-weight:500;transition:all .2s}
+.back-btn:hover{background:#e0d0c0;color:#5a3f2a}
+.refresh-btn{background:#b5745a;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;transition:all .2s}
+.refresh-btn:hover{background:#9a5f48}
+.schedule-info{text-align:right;font-size:11px;color:#a09080}
+.schedule-info span{display:block;font-size:13px;color:#b5745a;font-weight:600}
+.pulse{width:10px;height:10px;border-radius:50%;background:#4caf50;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.content{max-width:900px;margin:0 auto;padding:24px}
+
+.hospital-banner{background:#fff;border:1px solid #e8e0da;border-radius:16px;padding:20px 24px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.hospital-banner .name{font-size:16px;font-weight:700;color:#2d2319;margin-bottom:6px}
+.hospital-banner .desc{font-size:12px;color:#8b6f5a;line-height:1.6}
+.hospital-banner .tag{display:inline-block;background:#b5745a;color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-right:6px;margin-top:8px}
+
+.kpi-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+.kpi{background:#fff;border-radius:14px;padding:20px;border:1px solid #e8e0da;text-align:center;position:relative;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0}
+.kpi.sent::before{background:#b5745a}
+.kpi.success::before{background:#4caf50}
+.kpi.fail::before{background:#e53935}
+.kpi.response::before{background:#7c3aed}
+.kpi .label{font-size:11px;color:#a09080;font-weight:500;text-transform:uppercase;letter-spacing:.5px}
+.kpi .value{font-size:36px;font-weight:800;margin:8px 0 4px}
+.kpi.sent .value{color:#b5745a}
+.kpi.success .value{color:#4caf50}
+.kpi.fail .value{color:#e53935}
+.kpi.response .value{color:#7c3aed}
+.kpi .sub{font-size:11px;color:#a09080}
+
+.table-box{background:#fff;border-radius:14px;border:1px solid #e8e0da;overflow:hidden;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.table-header{padding:14px 18px;border-bottom:1px solid #e8e0da;display:flex;justify-content:space-between;align-items:center}
+.table-header h3{font-size:13px;font-weight:600;color:#2d2319}
+.table-header .count{font-size:11px;color:#a09080}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:#faf7f5;padding:8px 14px;text-align:left;font-size:11px;color:#a09080;font-weight:500}
+tbody td{padding:8px 14px;border-top:1px solid #f5f0ec;color:#4a3f35}
+tbody tr:hover{background:#faf7f5}
+.status-ok{background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
+.status-fail{background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
+
+.links-bar{display:flex;gap:10px;margin-bottom:24px}
+.link-btn{flex:1;background:#fff;border:1px solid #e8e0da;border-radius:12px;padding:14px;text-align:center;text-decoration:none;color:#8b6f5a;font-size:12px;font-weight:500;transition:all .2s;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.link-btn:hover{background:#faf7f5;color:#5a3f2a;border-color:#d0c0b0}
+.link-btn .icon{font-size:20px;display:block;margin-bottom:6px}
+
+.loading{text-align:center;padding:60px 20px;color:#a09080}
+.loading .spinner{width:32px;height:32px;border:3px solid #e8e0da;border-top-color:#b5745a;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.footer{text-align:center;padding:16px;font-size:11px;color:#a09080}
+
+@media(max-width:768px){.kpi-cards{grid-template-columns:repeat(2,1fr)}.links-bar{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>고운하지 흉부외과 <span>체험단 대시보드</span></h1>
+    <p id="dataStatus">데이터 로딩 중...</p>
+  </div>
+  <div class="header-right">
+    <a href="index.html" class="back-btn">← 공통 대시보드</a>
+    <button class="refresh-btn" onclick="loadAll()">새로고침</button>
+    <div class="schedule-info">자동 발송<span>월/수/목/토 05:00 AM</span></div>
+    <div class="pulse"></div>
+  </div>
+</div>
+
+<div class="content">
+
+<div class="hospital-banner">
+  <div class="name">고운하지 흉부외과</div>
+  <div class="desc">강남역 11번 출구 바로 앞 | 하지정맥류 전문 의원 | 혈관오빠 대표원장님 직접 검사</div>
+  <span class="tag">하지정맥류 초음파</span>
+  <span class="tag">체열검사 무료</span>
+  <span class="tag">eyejwti 발송</span>
+</div>
+
+<div class="kpi-cards">
+  <div class="kpi sent">
+    <div class="label">총 발송</div>
+    <div class="value" id="kpiSent">-</div>
+    <div class="sub">전체 시도 수</div>
+  </div>
+  <div class="kpi success">
+    <div class="label">발송 성공</div>
+    <div class="value" id="kpiSuccess">-</div>
+    <div class="sub" id="kpiSuccessRate">성공률 계산 중</div>
+  </div>
+  <div class="kpi fail">
+    <div class="label">발송 실패</div>
+    <div class="value" id="kpiFail">-</div>
+    <div class="sub">오류 건수</div>
+  </div>
+  <div class="kpi response">
+    <div class="label">폼 응답</div>
+    <div class="value" id="kpiResponse">-</div>
+    <div class="sub" id="kpiConversion">전환율 계산 중</div>
+  </div>
+</div>
+
+<div class="links-bar">
+  <a href="https://docs.google.com/spreadsheets/d/1umUs3Ouh1iRXTvFyTtJhuyACyxOG8pvS2iwztOqiORg/edit" target="_blank" class="link-btn">
+    <span class="icon">📊</span>발송이력 시트
+  </a>
+  <a href="https://docs.google.com/spreadsheets/d/1CasQL7AJs_d1cXTLE7kCbyElfYjFKVyEKwGhr9-A8Ng/edit" target="_blank" class="link-btn">
+    <span class="icon">📋</span>폼 응답 시트
+  </a>
+  <a href="https://docs.google.com/forms/d/e/1FAIpQLSdrAvJ1WjfT8xyp-qV8txX2RohHtLlFHckn3RV9wf0zHQnKIg/viewform" target="_blank" class="link-btn">
+    <span class="icon">📝</span>구글 폼 보기
+  </a>
+  <a href="email_preview_gounhaji.html" target="_blank" class="link-btn">
+    <span class="icon">✉️</span>메일 미리보기
+  </a>
+</div>
+
+<div class="table-box">
+  <div class="table-header">
+    <h3>최근 발송 이력</h3>
+    <span class="count" id="historyCount">-</span>
+  </div>
+  <div id="historyLoading" class="loading"><div class="spinner"></div>발송 이력 로딩 중...</div>
+  <table id="historyTable" style="display:none">
+    <thead><tr><th>발송일시</th><th>수신자</th><th>블로그명</th><th>키워드</th><th>상태</th></tr></thead>
+    <tbody id="historyBody"></tbody>
+  </table>
+</div>
+
+<div class="table-box">
+  <div class="table-header">
+    <h3>폼 응답자 목록</h3>
+    <span class="count" id="responseCount">-</span>
+  </div>
+  <div id="responseLoading" class="loading"><div class="spinner"></div>응답 데이터 로딩 중...</div>
+  <table id="responseTable" style="display:none">
+    <thead><tr><th>응답일시</th><th>성함</th><th>연락처</th><th>블로그주소</th></tr></thead>
+    <tbody id="responseBody"></tbody>
+  </table>
+</div>
+
+</div>
+
+<div class="footer">고운하지 흉부외과 전용 체험단 자동화 — DP Works</div>
+
+<script>
+const HISTORY_SHEET_ID = '1umUs3Ouh1iRXTvFyTtJhuyACyxOG8pvS2iwztOqiORg';
+const FORM_SHEET_ID = '1CasQL7AJs_d1cXTLE7kCbyElfYjFKVyEKwGhr9-A8Ng';
+const HISTORY_TAB = '고운하지_발송이력';
+const FORM_TAB = '설문지 응답 시트1';
+
+async function fetchSheet(sheetId, tabName) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}`;
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\)/)[1]);
+    if (!json.table) return [];
+    const cols = json.table.cols.map(c => c.label || '');
+    return json.table.rows.map(r => {
+      const obj = {};
+      r.c.forEach((cell, i) => { obj[cols[i] || `col${i}`] = cell ? (cell.f || cell.v || '') : ''; });
+      return obj;
+    });
+  } catch(e) { console.error(`시트 로드 실패 (${tabName}):`, e); return []; }
+}
+
+async function loadAll() {
+  document.getElementById('dataStatus').textContent = '데이터 로딩 중...';
+  try {
+    const [history, responses] = await Promise.all([
+      fetchSheet(HISTORY_SHEET_ID, HISTORY_TAB),
+      fetchSheet(FORM_SHEET_ID, FORM_TAB)
+    ]);
+    renderKPI(history, responses);
+    renderHistory(history);
+    renderResponses(responses);
+    const now = new Date();
+    document.getElementById('dataStatus').textContent =
+      `마지막 업데이트: ${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  } catch(e) { document.getElementById('dataStatus').textContent = '데이터 로드 실패'; }
+}
+
+function renderKPI(history, responses) {
+  const total = history.length, success = history.filter(r => (r['발송 상태']||r['col7']||'').includes('성공')).length;
+  const fail = total - success, resp = responses.length;
+  document.getElementById('kpiSent').textContent = total.toLocaleString();
+  document.getElementById('kpiSuccess').textContent = success.toLocaleString();
+  document.getElementById('kpiFail').textContent = fail.toLocaleString();
+  document.getElementById('kpiResponse').textContent = resp.toLocaleString();
+  document.getElementById('kpiSuccessRate').textContent = `성공률 ${total>0?((success/total)*100).toFixed(1):'0'}%`;
+  document.getElementById('kpiConversion').textContent = `전환율 ${success>0?((resp/success)*100).toFixed(1):'0'}%`;
+}
+
+function renderHistory(data) {
+  document.getElementById('historyLoading').style.display = 'none';
+  document.getElementById('historyTable').style.display = 'table';
+  document.getElementById('historyCount').textContent = `총 ${data.length}건`;
+  const tbody = document.getElementById('historyBody');
+  const recent = data.slice(-30).reverse();
+  tbody.innerHTML = recent.map(r => {
+    const status = r['발송 상태']||r['col7']||'-';
+    const cls = status.includes('성공') ? 'status-ok' : 'status-fail';
+    return `<tr><td>${r['발송일시']||r['col0']||'-'}</td><td>${r['수신 이메일']||r['col2']||'-'}</td><td>${r['블로그명']||r['col4']||'-'}</td><td>${r['검색 키워드']||r['col6']||'-'}</td><td><span class="${cls}">${status}</span></td></tr>`;
+  }).join('');
+}
+
+function renderResponses(data) {
+  document.getElementById('responseLoading').style.display = 'none';
+  document.getElementById('responseTable').style.display = 'table';
+  document.getElementById('responseCount').textContent = `총 ${data.length}건`;
+  const tbody = document.getElementById('responseBody');
+  const recent = data.slice(-20).reverse();
+  tbody.innerHTML = recent.map(r => {
+    const vals = Object.values(r);
+    const blog = vals[3]||'-';
+    const blogLink = blog.startsWith('http') ? `<a href="${blog}" target="_blank" style="color:#b5745a">${blog}</a>` : blog;
+    return `<tr><td>${vals[0]||'-'}</td><td>${vals[1]||'-'}</td><td>${vals[2]||'-'}</td><td>${blogLink}</td></tr>`;
+  }).join('');
+}
+
+loadAll();
+</script>
+</body>
+</html>
