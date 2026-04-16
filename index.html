@@ -401,8 +401,14 @@ async function loadAllData() {
   if (formResult) {
     // 시행 시작일 이후 응답만 필터링
     formData = formResult.rows.filter(r => {
-      const ts = String(r['타임스탬프'] || r['Timestamp'] || Object.values(r)[0] || '');
-      // 날짜 형식: "2026. 3. 27" 또는 "2026/3/27" 또는 "2026-03-27" 등
+      const ts = String(r['타임스탬프'] || r['Timestamp'] || r['일시'] || Object.values(r)[0] || '');
+      // gviz Date(yyyy,m,d,...) 형식 처리 — month는 0-based
+      const gvizMatch = ts.match(/Date\((\d{4}),(\d+),(\d+)/);
+      if (gvizMatch) {
+        const rowDate = `${gvizMatch[1]}-${String(parseInt(gvizMatch[2])+1).padStart(2,'0')}-${gvizMatch[3].padStart(2,'0')}`;
+        return rowDate >= LAUNCH_DATE;
+      }
+      // 일반 날짜 형식: "2026. 3. 27" 또는 "2026/3/27" 또는 "2026-03-27" 등
       const dateMatch = ts.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/);
       if (!dateMatch) return false;
       const rowDate = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
